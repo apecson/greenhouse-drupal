@@ -1,0 +1,187 @@
+<?php
+
+/**
+ * @file
+ */
+
+/**
+ * Implements hook_block_info().
+ */
+function ap_greenhouse_block_info() {
+
+  $blocks = array();
+
+  $blocks['greenhouse_positions'] = array(
+    'info' => t('Open Positions from Greenhouse'),
+    'cache' => DRUPAL_CACHE_GLOBAL
+  );
+
+  $blocks['greenhouse_filter'] = array(
+    'info' => t('Greenhouse Filter'),
+    'cache' => DRUPAL_CACHE_GLOBAL
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function ap_greenhouse_block_view($delta = '') {
+
+  $block = array();
+
+  switch ($delta) {
+    case 'greenhouse_positions':
+      $block['content'] = ap_greenhouse_open_position_block();
+      break;
+
+    case 'greenhouse_filter':
+      $block['content'] = ap_greenhouse_filter_block();
+      break;
+  }
+
+  return $block;
+}
+
+/**
+ * Implements foapatting helper function for departments.
+ */
+function _ap_greenhouse_foapat_department($department) {
+  return check_plain(str_replace(' ', '-', strtolower($department)));
+}
+
+/**
+ * Greenhouse API Request.
+ */
+function ap_greenhouse_api_request_departments() {
+  $departments = &drupal_static(__FUNCTION__);
+
+  if (!isset($departments)) {
+    $departments = array();
+
+    $cid = 'ap_greehhouse_api_departments';
+
+    // Try to load from the cache.
+    $cache = cache_get($cid);
+
+    if (!empty($cache->data) && REQUEST_TIME < $cache->expire) {
+      $departments = $cache->data;
+    }
+    else {
+      $base_url = BASE_URL;
+      $headers = array('Accept' => 'application/json');
+      $options = array(
+        'headers' => $headers,
+        'method' => 'GET',
+      );
+      $response = drupal_http_request($base_url, $options);
+      $data = json_decode($response->data);
+      if ($response->code == 200 && !empty($response->data)) {
+        $json = json_decode($response->data);
+
+        if (!empty($json->departments)) {
+          $departments = $json->departments;
+
+          // Cache for 5 minutes.
+          cache_set($cid, $departments, 'cache', REQUEST_TIME +
+            variable_get('ap_greenhouse_api_request_departments_cache', 300));
+        }
+      }
+    }
+  }
+
+  return $departments;
+}
+
+/**
+ * Block callback: Greenhouse Filters for open positions.
+ */
+function ap_greenhouse_filter_block() {
+  $greenhouse = ap_greenhouse_api_request_departments();
+
+  $departments = array();
+
+  foreach ($greenhouse as $department) {
+    if ($department->name != 'No Department' && !empty($department->jobs)) {
+      $filter = _ap_greenhouse_foapat_department($department->name);
+      $departments[] = array(
+        '#prefix' => '<div class="careers__job-filter careers__job-filter--' . $filter . '">',
+        '#markup' => '<a data-filter=".' . $filter . '">' . check_plain($department->name) . '</a>',
+        '#suffix' => '</div>'
+      );
+    }
+  }
+
+  $block = array(
+    'button-group' => array(
+      '#prefix' => '<div class="button-group filter-button-group">',
+      '#suffix' => '</div>',
+      'departments' => $departments,
+      'reset' => array(
+        '#prefix' => '<div class="careers__job-filter--reset"><a data-filter="*">',
+        '#suffix' => '</a></div>',
+        '#markup' => t('Show All Jobs'),
+      ),
+    ),
+    '#access' => !empty($departments),
+  );
+
+  return $block;
+}
+
+/**
+ * Block callback: Display open positions from Greenhouse.
+ */
+function ap_greenhouse_open_position_block() {
+  $greenhouse = ap_greenhouse_api_request_departments();
+
+  $departments = array();
+
+  foreach ($greenhouse as $department) {
+    if ($department->name != 'No Department' && !empty($department->jobs)) {
+      $filter = _ap_greenhouse_foapat_department($department->name);
+
+      $jobs = array();
+      foreach ($department->jobs as $job) {
+        $jobs[] = array(
+          '#prefix' => '<div class="job-opportunity__item ' . $filter . '" "data-department="' . $filter . '">',
+          '#suffix' => '</div>',
+          'title' => array(
+            '#theme' => 'link',
+            '#text' => $job->title,
+            '#path' => $job->absolute_url,
+            '#options' => array(
+              'html' => FALSE,
+              'attributes' => array(
+                'class' => array('job-opportunity__link'),
+                'target' => '_blank'
+              ),
+            ),
+          ),
+          'location' => array(
+            '#prefix' => '<span class="job-opportunity__location">',
+            '#markup' => check_plain($job->location->name),
+            '#suffix' => '</span>',
+          ),
+        );
+      }
+
+      $departments[] = array(
+        '#prefix' => '<div class="job-opportunity__department">' . check_plain($department->name) . '</div>',
+        'jobs' => $jobs,
+      );
+    }
+  }
+
+  $block = array(
+    'list' => array(
+      '#prefix' => '<div class="job-opportunity__list-wrapper"><div class="job-opportunity__list">',
+      '#suffix' => '</div></div>',
+      'departments' => $departments,
+    ),
+    '#access' => !empty($departments),
+  );
+
+  return $block;
+}

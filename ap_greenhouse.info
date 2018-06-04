@@ -1,0 +1,4 @@
+name = Greenhouse
+description = Integration with greenhouse.io
+package = Greenhouse
+core = 7.x
